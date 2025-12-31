@@ -1,0 +1,219 @@
+# Thermal Environment Configuration
+# All physical parameters and training settings
+
+# ==================== BUILDING PARAMETERS ====================
+building:
+  # Thermal capacitances (J/K)
+  C_air: 5.0e6           # Indoor air thermal mass (~50 m³ air + furniture)
+  C_envelope: 5.0e7      # Building envelope thermal mass (walls, floor, ceiling)
+  
+  # Thermal resistances (K/W)
+  R_air_outdoor: 0.01    # Air to outdoor (windows, ventilation) - low resistance
+  R_envelope_indoor: 0.005  # Envelope to indoor air - very low resistance
+  R_envelope_outdoor: 0.02  # Envelope to outdoor - higher resistance (insulation)
+  
+  # Solar gains (W)
+  solar_gain_max: 1000.0    # Maximum solar gain (south-facing windows)
+  solar_gain_min: 100.0     # Minimum solar gain (cloudy/night)
+  
+  # Floor area for normalization
+  floor_area: 100.0      # m²
+
+# ==================== HEAT PUMP PARAMETERS ====================
+heat_pump:
+  # COP (Coefficient of Performance) model
+  COP_nominal: 3.5       # Nominal COP at reference conditions
+  COP_min: 2.0           # Minimum COP (very cold outdoor)
+  COP_max: 5.0           # Maximum COP (mild outdoor)
+  
+  # Temperature coefficients for COP calculation
+  k1: 0.03               # Outdoor temperature coefficient (positive)
+  k2: 0.02               # Indoor temperature coefficient (negative)
+  T_outdoor_ref: 7.0     # Reference outdoor temperature (°C)
+  T_indoor_ref: 21.0     # Reference indoor temperature (°C)
+  
+  # Power levels (W) - Discrete control
+  power_levels:
+    'OFF': 0
+    'LOW': 2000
+    'MEDIUM': 4000
+    'HIGH': 6000
+  
+  # Response time
+  thermal_inertia: 0.9   # Smoothing factor for heat output (0-1)
+
+# ==================== COMFORT SETTINGS ====================
+comfort:
+  T_min: 20.0            # Minimum comfortable temperature (°C)
+  T_max: 22.0            # Maximum comfortable temperature (°C)
+  T_critical_min: 10.0   # Emergency termination (too cold)
+  T_critical_max: 35.0   # Emergency termination (too hot)
+  
+  # Initial conditions
+  T_initial_min: 18.0    # Minimum initial indoor temperature
+  T_initial_max: 24.0    # Maximum initial indoor temperature
+
+# ==================== SIMULATION PARAMETERS ====================
+simulation:
+  dt: 900                # Time step (seconds) - 15 minutes
+  episode_length: 192    # Steps per episode (48 hours @ 15min)
+  
+  # Weather generation
+  weather:
+    T_mean: 5.0                  # Mean outdoor temperature (°C)
+    T_std: 8.0                   # Standard deviation (°C)
+    T_min: -15.0                 # Absolute minimum
+    T_max: 30.0                  # Absolute maximum
+    diurnal_amplitude: 4.0       # Day-night temperature swing (°C)
+    
+  # Random seed for reproducibility
+  random_seed: 42
+
+# ==================== REWARD FUNCTION ====================
+reward:
+  # Reward formulation type: 'pid_shaped', 'literature', or 'quadratic'
+  # - 'pid_shaped': Progressive penalty + derivative bonus (PID-inspired) - BROKEN, causes early termination
+  # - 'literature': -α|T - T_set| - βP - λΔAction  (from papers) - WORKS WELL
+  # - 'quadratic': -α(T_viol)² - βP  (original implementation)
+  type: 'literature'
+  
+  # Target setpoint temperature (°C)
+  T_setpoint: 21.0
+  
+  # Weights for multi-objective optimization
+  comfort_weight: 10.0       # Weight for temperature deviation (α)
+  energy_weight: 0.005       # Weight for power consumption (β) - back to working value
+  cycling_weight: 0.1        # Weight for action changes (λ) - back to working value
+  
+  # For 'literature' type:
+  # reward = -comfort_weight × |T_indoor - T_setpoint| 
+  #          - energy_weight × P_electrical
+  #          - cycling_weight × |action_t - action_t-1|
+  #
+  # With these weights:
+  # - 1°C deviation costs 10 reward units
+  # - 6000W power costs 30 reward units (6000 × 0.005)
+  # - Action change costs 0.1-0.3 reward units
+  #
+  # Balance: Comfort is 3x more important than max energy cost
+  
+  # For 'quadratic' type (old):
+  # reward = -comfort_weight × (T_violation)² - energy_weight × (P_kW × price)
+
+# ==================== ELECTRICITY PRICING ====================
+electricity:
+  price_per_kwh: 0.30       # €/kWh (constant for now, can be made time-varying)
+  # Future: can add time-of-use pricing with peak/off-peak rates
+
+# ==================== BASELINE CONTROLLER PARAMETERS ====================
+baselines:
+  # ON-OFF Controller (Bang-Bang Thermostat)
+  onoff:
+    deadband: 0.5           # Temperature deadband (°C) to prevent chattering
+  
+  # PID Controller
+  pid:
+    Kp: 500.0               # Proportional gain
+    Ki: 10.0                # Integral gain
+    Kd: 100.0               # Derivative gain
+  
+  # MPC Controller
+  mpc:
+    horizon: 24             # Prediction horizon (steps) - 6 hours @ 15min
+    alpha_comfort: 10.0     # Comfort cost weight
+    beta_cost: 1.0          # Energy cost weight
+    lambda_cycle: 50.0      # Cycling penalty weight
+
+# ==================== RL TRAINING PARAMETERS ====================
+training:
+  # DQN
+  dqn:
+    learning_rate: 1.0e-3
+    batch_size: 64
+    gamma: 0.99
+    buffer_size: 50000
+    learning_starts: 1000
+    target_update_interval: 1000
+    train_freq: 4
+    gradient_steps: 1
+    exploration_fraction: 0.3
+    exploration_initial_eps: 1.0
+    exploration_final_eps: 0.05
+    max_grad_norm: 10
+    policy_kwargs:
+      net_arch: [64, 64]
+  
+  # A2C (Advantage Actor-Critic)
+  a2c:
+    learning_rate: 7.0e-4  # Default A2C learning rate
+    n_steps: 5              # Steps per update (synchronous)
+    gamma: 0.99
+    gae_lambda: 1.0         # No GAE for standard A2C
+    ent_coef: 0.01          # Entropy bonus for exploration
+    vf_coef: 0.5            # Value function coefficient
+    max_grad_norm: 0.5      # Gradient clipping
+    policy_kwargs:
+      net_arch: [64, 64]    # Simple network
+  
+  # PPO (NOT USED - failed to learn)
+  ppo:
+    learning_rate: 1.0e-4  # Slower learning for stability
+    n_steps: 2048
+    batch_size: 64
+    n_epochs: 10
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    clip_range_vf: 10.0  # ADDED: Clip value function updates for stability
+    normalize_advantage: true
+    ent_coef: 0.05  # REDUCED: Start lower, will use LinearSchedule in code
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+    policy_kwargs:
+      net_arch:
+        pi: [128, 128]  # LARGER: More capacity (was [64, 64])
+        vf: [128, 128]  # LARGER: Better value estimation
+  
+  # TD3 (NOT USED - failed with discrete actions)
+  td3:
+    learning_rate: 1.0e-3
+    batch_size: 100
+    gamma: 0.99
+    tau: 0.005
+    policy_delay: 2
+    target_policy_noise: 0.2
+    target_noise_clip: 0.5
+    buffer_size: 50000
+    learning_starts: 1000
+    train_freq: 1
+    gradient_steps: 1
+    policy_kwargs:
+      net_arch: [256, 256]
+  
+  # General training settings
+  total_timesteps: 200000     # Total training steps
+  eval_freq: 5000              # Evaluate every N steps
+  n_eval_episodes: 10          # Number of evaluation episodes
+  save_freq: 10000             # Save model every N steps
+  
+  # Logging
+  log_interval: 10             # Log every N episodes
+  tensorboard: true            # Enable TensorBoard logging
+  verbose: 1                   # Verbosity level
+
+# ==================== DATA LOGGING ====================
+logging:
+  # Episode-level metrics
+  log_episodes: true
+  
+  # Step-level detailed logs (sampled to avoid huge files)
+  log_steps: true
+  step_log_frequency: 10       # Log every Nth step
+  
+  # Evaluation logging
+  log_evaluation: true
+  
+  # Output directories
+  log_dir: "data/logs"
+  tensorboard_dir: "runs"
+  model_dir: "trained_models"
