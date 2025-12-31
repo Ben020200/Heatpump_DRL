@@ -4,10 +4,12 @@ A comprehensive framework for training and evaluating Deep Reinforcement Learnin
 
 ## 🎯 Project Overview
 
-This project implements a realistic thermal environment simulation based on RC (Resistance-Capacitance) network physics, integrated with three state-of-the-art RL algorithms:
-- **DQN** (Deep Q-Network) - Value-based learning
-- **PPO** (Proximal Policy Optimization) - Policy gradient method
-- **SAC** (Soft Actor-Critic) - Off-policy actor-critic
+This project implements a realistic thermal environment simulation based on RC (Resistance-Capacitance) network physics, integrated with multiple state-of-the-art RL algorithms:
+- **SAC** (Soft Actor-Critic) - Off-policy actor-critic with maximum entropy (best performance)
+- **DQN** (Deep Q-Network) - Value-based learning with experience replay
+- **A2C** (Advantage Actor-Critic) - On-policy synchronous actor-critic
+- **PPO** (Proximal Policy Optimization) - Policy gradient method with trust region
+- **TD3** (Twin Delayed DDPG) - Off-policy continuous control
 
 ### Key Features
 
@@ -61,23 +63,30 @@ python -m utils.weather_generator
 ### Train an Agent
 
 ```bash
-# Train DQN (fastest)
-python agents/train_dqn.py --timesteps 200000 --name my_dqn_experiment
+# Train SAC (recommended - best performance, 26% better than PID baseline)
+python agents/train_sac.py --timesteps 100000 --name my_sac_experiment
 
-# Train PPO (most stable)
-python agents/train_ppo.py --timesteps 200000 --name my_ppo_experiment
+# Train DQN (value-based, good for discrete actions)
+python agents/train_dqn.py --timesteps 100000 --name my_dqn_experiment
 
-# Train SAC (best performance)
-python agents/train_sac.py --timesteps 200000 --name my_sac_experiment
+# Train A2C (on-policy, synchronous updates)
+python agents/train_a2c.py --timesteps 100000 --name my_a2c_experiment
+
+# Train PPO (stable policy gradients)
+python agents/train_ppo.py --timesteps 100000 --name my_ppo_experiment
+
+# Train TD3 (continuous control variant)
+python agents/train_td3.py --timesteps 100000 --name my_td3_experiment
 ```
 
 ### Evaluate Models
 
 ```bash
 python agents/evaluate.py \
-    --models trained_models/dqn/my_dqn_experiment/best_model.zip \
-             trained_models/ppo/my_ppo_experiment/best_model.zip \
-    --names DQN PPO \
+    --models trained_models/sac/my_sac_experiment/best_model.zip \
+             trained_models/dqn/my_dqn_experiment/best_model.zip \
+             trained_models/a2c/my_a2c_experiment/best_model.zip \
+    --names SAC DQN A2C \
     --episodes 10 \
     --output data/evaluation
 ```
@@ -115,9 +124,11 @@ Heatpump_DRL/
 │   ├── heat_pump_model.py        # COP-based heat pump
 │   └── thermal_env.py            # Gymnasium environment
 ├── agents/
+│   ├── train_sac.py              # SAC training (recommended)
 │   ├── train_dqn.py              # DQN training
+│   ├── train_a2c.py              # A2C training
 │   ├── train_ppo.py              # PPO training
-│   ├── train_sac.py              # SAC training
+│   ├── train_td3.py              # TD3 training
 │   └── evaluate.py               # Model evaluation
 ├── utils/
 │   ├── weather_generator.py      # Synthetic weather data
@@ -157,11 +168,12 @@ Heatpump_DRL/
 
 ### Reward Function
 ```python
-reward = comfort_penalty + energy_penalty
+reward = comfort_penalty + energy_penalty + cycling_penalty
 
 where:
-    comfort_penalty = -10 × (T_violation)²  if outside [20, 22]°C
-    energy_penalty = -0.1 × P_electrical
+    comfort_penalty = -10.0 × |T_indoor - 21°C|
+    energy_penalty = -0.005 × P_electrical (kW)
+    cycling_penalty = -0.1 × |action_t - action_{t-1}|
 ```
 
 ### Physics Model
@@ -184,13 +196,13 @@ Q_thermal = COP × P_electrical
 
 Default hyperparameters are optimized for convergence:
 
-| Parameter | DQN | PPO | SAC |
-|-----------|-----|-----|-----|
-| Learning Rate | 1e-3 | 3e-4 | 1e-3 |
-| Batch Size | 64 | 64 | 100 |
-| Network | [64, 64] | [64, 64] | [256, 256] |
-| Buffer Size | 50k | N/A | 50k |
-| Total Timesteps | 200k | 200k | 200k |
+| Parameter | SAC | DQN | A2C | PPO | TD3 |
+|-----------|-----|-----|-----|-----|-----|
+| Learning Rate | 3e-4 | 1e-3 | 7e-4 | 3e-4 | 1e-3 |
+| Batch Size | 256 | 64 | N/A | 64 | 100 |
+| Network | [256,256] | [64,64] | [64,64] | [64,64] | [256,256] |
+| Buffer Size | 50k | 50k | N/A | N/A | 50k |
+| Total Timesteps | 100k | 100k | 100k | 100k | 100k |
 
 Edit `config/thermal_config.yaml` to customize.
 
@@ -255,17 +267,28 @@ Each module has standalone tests in its `__main__` block.
 
 Agents are evaluated on:
 
-1. **Comfort**: % time within 20-22°C
-2. **Energy**: Total kWh consumed
-3. **Efficiency**: Average COP achieved
-4. **Reward**: Cumulative episode reward
-5. **Cost**: Combined comfort + energy cost
+1. **Reward**: Cumulative episode reward (higher is better)
+2. **Energy**: Total kWh consumed per 48-hour episode
+3. **Comfort Violations**: Number of timesteps outside 20-22°C
+4. **Efficiency**: Average COP achieved
+5. **Stability**: Training variance (lower is better)
 
-Typical performance after training:
-- **Comfort violations**: < 5%
-- **Energy consumption**: 20-30 kWh/48h
-- **Average COP**: 3.2-3.8
-- **Improvement over random**: 300-500%
+### Experimental Results (Final 50 Episodes)
+
+Comparison vs. PID baseline (Kp=500, Ki=10, Kd=100):
+
+| Algorithm | Reward | Energy (kWh) | Violations | COP | Performance vs PID |
+|-----------|--------|--------------|------------|-----|-------------------|
+| **SAC** | -2,152 ± 756 | 26.9 ± 18.1 | 68 ± 49 | 3.40 | **+26% better** |
+| **DQN** | -3,453 ± 1,611 | 21.1 ± 12.9 | 116 ± 45 | 3.52 | -18% worse |
+| **A2C** | -8,870 ± 4,025 | 4.3 ± 7.1 | 165 ± 44 | 3.66 | -204% worse |
+| **PID** | -2,916 | 32.4 | 121 | - | baseline |
+
+**Key Findings:**
+- SAC achieves 26% performance improvement over PID baseline
+- 17% energy reduction while improving comfort (44% fewer violations)
+- Off-policy algorithms (SAC, DQN) outperform on-policy (A2C) for this task
+- Maximum entropy exploration (SAC) enables superior convergence
 
 ## 🔧 Configuration
 
