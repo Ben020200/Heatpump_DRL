@@ -1,0 +1,106 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{cite}
+
+\title{Control Optimization of Residential Air-Source Heat Pumps Using Model-Based Reinforcement Learning}
+\author{
+    \IEEEauthorblockN{Ben Anton Goff}
+    \IEEEauthorblockA{
+        University of Applied Sciences Augsburg\\
+        Email: bengoff16@gmail.com
+    }
+}
+
+\begin{document}
+\maketitle
+
+\section{Motivation and Background}
+Heating and cooling account for a major share of residential energy use, and in many European countries air-source heat pumps (ASHPs) are being installed at record rates to replace fossil-fuel boilers. While these systems are efficient, they are typically operated with fixed rule-based control parameters that cannot adapt to the building’s changing thermal dynamics, occupancy, or weather conditions. This results in suboptimal performance, excessive compressor cycling, and unnecessary energy use.
+
+Every dwelling exhibits unique thermal inertia, insulation, and occupant behavior, meaning that a single static control strategy cannot achieve optimal operation across diverse scenarios. Reinforcement learning (RL) provides a framework in which a control policy can learn from interaction with the environment and improve its performance autonomously. In contrast to classical model predictive control (MPC), which relies on explicit optimization at each timestep, RL can learn directly from data to approximate long-term cost-to-go functions.
+
+However, applying RL to building systems presents challenges: data collection is slow, exploration can damage equipment, and purely model-free algorithms often require millions of interactions to converge. The thermal dynamics of heat pumps are continuous and sluggish, with state changes occurring over minutes rather than milliseconds. These characteristics make model-based reinforcement learning (MBRL) especially suitable. By incorporating a simplified physical model of heat transfer and compressor behavior, the agent can simulate trajectories internally, improving sample efficiency and stability. In this project, MBRL is proposed as a method to enable adaptive, safe, and interpretable control of residential ASHPs, bridging the gap between physical modeling and data-driven decision making.
+
+\section{Related Work}
+\subsection{RL for HVAC and Building Energy Control}
+Deep reinforcement learning has been successfully applied to building HVAC control to achieve energy savings and improved comfort levels [1], [2]. These early studies mainly relied on model-free algorithms such as DQN, DDPG, and PPO, which learn optimal actions directly from experience without requiring explicit models of system dynamics. Despite promising results, these methods often required extensive simulation time and large datasets to converge, which limits their applicability in real-world systems. Similar findings have been reported for adaptive climate control and energy-efficient operation of smart buildings [5], [6].
+
+\subsection{Heat Pump Control and Demand Response}
+Reinforcement learning has also been explored for the optimization of residential heat pump systems and demand response strategies [3], [4], [7]. In these works, agents were trained to minimize energy consumption and adapt to dynamic pricing signals. Although energy efficiency improved, most approaches remained purely data-driven and did not explicitly incorporate physical constraints or thermodynamic knowledge. Consequently, the learned policies were sample-inefficient and difficult to interpret, and safe exploration remained a major limitation.
+
+\subsection{Model-Based RL and Hybrid Methods}
+Recent research trends have focused on model-based and hybrid RL frameworks to enhance sample efficiency and improve interpretability [8]–[10]. In these methods, the RL agent learns or uses an analytical transition model to predict future states, allowing for internal planning and policy refinement. Studies have demonstrated that integrating model learning with policy optimization can substantially accelerate convergence and improve control stability in building environments [8]. However, very few works have extended this approach to residential air-source heat pumps, where accurate physical models are available and the slow system dynamics are well-suited to model-based learning. This motivates the current work, which aims to apply MBRL to achieve data-efficient and reliable control in residential heating systems.
+
+\section{Problem Formulation}
+The control of an air-source heat pump can be formulated as a Markov Decision Process (MDP):
+\[
+\mathcal{M} = (\mathcal{S}, \mathcal{A}, P, R, \gamma)
+\]
+where $\mathcal{S}$ represents the set of measurable system states, $\mathcal{A}$ the available control actions, $P$ the transition model, $R$ the reward function, and $\gamma$ the discount factor. The aim is to derive an optimal policy $\pi^*(a|s)$ that minimizes long-term operational cost and energy use while maintaining indoor comfort and extending system lifespan.
+
+\subsection{State and Action Definitions}
+The state vector $s_t$ contains environmental and operational variables:
+\[
+s_t = [T_{in}, T_{out}, T_{set}, P_{hp}, \text{mode}, \text{time}, \text{price}]
+\]
+where $T_{in}$ is indoor temperature, $T_{out}$ is outdoor temperature, $T_{set}$ is the target setpoint, $P_{hp}$ is the compressor power, and $\text{mode}$ denotes heating, idle, or defrost operation. The action space includes compressor power modulation and discrete mode switching.
+
+\subsection{Physical Transition Model}
+System transitions are described by a simplified heat balance equation:
+\[
+T_{in, t+1} = T_{in, t} + \frac{\eta P_{hp, t} - U(T_{in, t} - T_{out, t})}{C_{th}} \Delta t
+\]
+where $C_{th}$ is the thermal capacity of the building, $U$ is the overall heat loss coefficient, $\eta$ is the coefficient of performance (COP) of the heat pump, and $\Delta t$ is the time step. This deterministic model forms the basis for the internal predictive model $\hat{P}(s_{t+1}|s_t,a_t)$ used for planning and policy updates.
+
+\subsection{Model-Based Learning Process}
+Unlike model-free RL, the MBRL agent employs both real and simulated experiences. Using the learned or analytic model $\hat{P}$, the agent generates synthetic trajectories to estimate future returns and refine the value function:
+\[
+\theta \leftarrow \theta + \alpha \nabla_\theta \mathbb{E}_{s,a\sim\hat{P}}\!\left[R(s,a) + \gamma V_{\theta'}(s') - V_\theta(s)\right]
+\]
+This enables faster learning from limited data and constrains the policy search to physically realistic state transitions.
+
+\subsection{Compressor Dynamics and Longevity}
+A key secondary objective is to minimize compressor wear by reducing the number of start–stop cycles. Frequent switching causes mechanical stress and shortens the compressor lifespan, which directly affects the reliability and sustainability of the entire system. To incorporate this into the optimization, an additional penalty term $C_{cycles}$ is introduced into the reward function:
+\[
+r_t = -\alpha |T_{in, t} - T_{set}| - \beta P_{consumed, t} - \lambda C_{cycles, t}
+\]
+where $\lambda$ is a weighting factor balancing comfort, energy efficiency, and longevity. By discouraging rapid state changes, the RL agent learns smoother control actions that maintain temperature stability while extending component life.
+
+\subsection{Objectives and Expected Outcomes}
+The overall objective is to learn a policy $\pi$ that minimizes the long-term cumulative cost:
+\[
+\min_\pi \mathbb{E}\!\left[\sum_t \left(\alpha |T_{in, t}-T_{set}| + \beta P_{consumed, t} + \lambda C_{cycles, t}\right)\right]
+\]
+Expected outcomes include:
+\begin{itemize}
+    \item Improved sample efficiency compared to model-free RL by leveraging the internal model for prediction and planning.
+    \item Reduced energy consumption while maintaining thermal comfort.
+    \item Fewer compressor starts and smoother operation, extending equipment lifespan.
+    \item Increased interpretability and safety through the use of physically constrained transitions.
+\end{itemize}
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\columnwidth]{system_model_placeholder.png}
+    \caption{Conceptual structure of the proposed model-based RL controller for a residential air-source heat pump.}
+    \label{fig:model}
+\end{figure}
+
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{10}
+\bibitem{wei2017hvac} T. Wei, et al., “Deep Reinforcement Learning for Building HVAC Control,” \emph{Applied Energy}, 2017.
+\bibitem{mocanu2018online} E. Mocanu, et al., “On-Line Building Energy Optimization Using Deep Reinforcement Learning,” \emph{IEEE Trans. Smart Grid}, 2018.
+\bibitem{kazmi2019realtime} H. Kazmi, et al., “Towards Real-Time Optimization of Residential Heat Pump Systems Using Reinforcement Learning,” \emph{Energy and Buildings}, 2019.
+\bibitem{liu2020review} X. Liu, et al., “Data-Driven Control Strategies for Heat Pump Systems: A Review,” \emph{Renewable and Sustainable Energy Reviews}, 2020.
+\bibitem{gao2021hvaccontrol} J. Gao, et al., “Reinforcement Learning Control for Energy-Efficient HVAC Operation,” \emph{Energy Reports}, 2021.
+\bibitem{zhang2022adaptive} Y. Zhang, et al., “Adaptive Building Climate Control via Deep Reinforcement Learning,” \emph{Energy and AI}, 2022.
+\bibitem{ruelens2016residential} F. Ruelens, et al., “Residential Demand Response of Thermostatically Controlled Loads Using Batch Reinforcement Learning,” \emph{Energy and Buildings}, 2016.
+\bibitem{li2023modelbased} J. Li, et al., “Model-Based Reinforcement Learning for Building Energy Optimization,” \emph{Applied Energy}, 2023.
+\bibitem{vazquez2019review} A. Vázquez-Canteli and Z. Nagy, “Reinforcement Learning for Demand Response: A Review,” \emph{Building and Environment}, 2019.
+\bibitem{gao2021hvaccontrol2} J. Gao and X. Xu, “Hybrid Control of Smart Buildings Using Model-Based Reinforcement Learning,” \emph{Energy}, 2021.
+\end{thebibliography}
+
+\end{document}
+

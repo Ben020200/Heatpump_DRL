@@ -86,6 +86,9 @@ class DataLogger:
                     'avg_power_kw',
                     'avg_cop',
                     'terminated',
+                    'total_cycles',
+                    'cycles_per_hour',
+                    'cycling_penalty_sum',
                 ])
     
     def _init_step_log(self):
@@ -149,6 +152,12 @@ class DataLogger:
         total_energy = episode_stats.get('total_energy', 0)
         avg_power = (total_energy / (episode_length * 0.25)) if episode_length > 0 else 0  # 15-min steps
         
+        # Cycling metrics
+        total_cycles = episode_stats.get('total_cycles', 0)
+        episode_hours = episode_length * 0.25
+        cycles_per_hour = total_cycles / episode_hours if episode_hours > 0 else 0
+        cycling_penalty_sum = episode_stats.get('cycling_penalty_sum', 0)
+        
         # Write to CSV
         with open(self.episode_log_path, 'a', newline='') as f:
             writer = csv.writer(f)
@@ -166,6 +175,9 @@ class DataLogger:
                 avg_power,
                 episode_stats.get('avg_cop', 0),
                 terminated,
+                total_cycles,
+                cycles_per_hour,
+                cycling_penalty_sum,
             ])
         
         # Write step data if logging steps

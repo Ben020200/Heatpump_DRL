@@ -84,6 +84,23 @@ def calculate_episode_metrics(step_data: pd.DataFrame,
             count = action_counts.get(action, 0)
             metrics[f'action_{action}_count'] = count
             metrics[f'action_{action}_pct'] = (count / len(step_data)) * 100
+        
+        # Compressor cycling metrics
+        actions = step_data['action'].values
+        action_changes = np.sum(np.diff(actions) != 0)
+        metrics['total_cycles'] = action_changes
+        metrics['cycles_per_hour'] = action_changes / (len(step_data) * dt_hours)
+        
+        # Average time between cycles (in hours)
+        if action_changes > 0:
+            metrics['avg_time_between_cycles_hours'] = (len(step_data) * dt_hours) / action_changes
+        else:
+            metrics['avg_time_between_cycles_hours'] = len(step_data) * dt_hours
+        
+        # Cycling severity (larger action jumps are worse)
+        action_deltas = np.abs(np.diff(actions))
+        metrics['avg_cycle_magnitude'] = action_deltas.mean() if len(action_deltas) > 0 else 0
+        metrics['max_cycle_magnitude'] = action_deltas.max() if len(action_deltas) > 0 else 0
     
     # Thermal output metrics
     if 'Q_thermal' in step_data:

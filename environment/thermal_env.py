@@ -188,6 +188,8 @@ class ThermalEnv(gym.Env):
             'temp_sum': 0.0,
             'min_temperature': T_initial,
             'max_temperature': T_initial,
+            'total_cycles': 0,
+            'cycling_penalty_sum': 0.0,
         }
         
         # Reset PID-inspired reward tracking
@@ -238,7 +240,11 @@ class ThermalEnv(gym.Env):
         )
         
         # Calculate reward (pass action for cycling penalty if using literature reward)
-        reward = self._calculate_reward(T_indoor, P_electrical, action)
+        reward, cycling_penalty = self._calculate_reward(T_indoor, P_electrical, action)
+        
+        # Track action changes (cycles)
+        if action != self.previous_action:
+            self.episode_stats['total_cycles'] += 1
         
         # Update statistics
         energy_kwh = P_electrical * (self.dt / 3600.0) / 1000.0  # kWh
@@ -246,6 +252,7 @@ class ThermalEnv(gym.Env):
         self.episode_stats['total_cost'] += energy_kwh * self.electricity_price  # €
         self.episode_stats['cop_sum'] += cop
         self.episode_stats['temp_sum'] += T_indoor
+        self.episode_stats['cycling_penalty_sum'] += cycling_penalty
         
         if not (self.T_comfort_min <= T_indoor <= self.T_comfort_max):
             self.episode_stats['comfort_violations'] += 1
@@ -295,6 +302,10 @@ class ThermalEnv(gym.Env):
         
         # Add thermal statistics when episode ends (for logging callback)
         if terminated or truncated:
+            dt_hours = self.dt / 3600.0
+            episode_hours = self.current_step * dt_hours
+            total_cycles = self.episode_stats.get('total_cycles', 0)
+            
             info['thermal_stats'] = {
                 'avg_temperature': self.episode_stats.get('avg_temperature', T_indoor),
                 'min_temperature': self.episode_stats.get('min_temperature', T_indoor),
@@ -302,6 +313,9 @@ class ThermalEnv(gym.Env):
                 'comfort_violations': self.episode_stats.get('comfort_violations', 0),
                 'total_energy_kwh': self.episode_stats.get('total_energy', 0),
                 'avg_cop': self.episode_stats.get('avg_cop', cop),
+                'total_cycles': total_cycles,
+                'cycles_per_hour': total_cycles / episode_hours if episode_hours > 0 else 0,
+                'cycling_penalty_sum': self.episode_stats.get('cycling_penalty_sum', 0),
             }
         
         return observation, reward, terminated, truncated, info
@@ -348,7 +362,7 @@ class ThermalEnv(gym.Env):
         
         return observation
     
-    def _calculate_reward(self, T_indoor: float, P_electrical: float, action: int = None) -> float:
+    def _calculate_reward(self, T_indoor: float, P_electrical: float, action: int = None) -> Tuple[float, float]:
         """
         Calculate reward for current state and action.
         
@@ -373,6 +387,7 @@ class ThermalEnv(gym.Env):
             
         Returns:
             reward: Scalar reward value (higher is better)
+            cycling_penalty: Cycling penalty component (for tracking)
         """
         
         if self.reward_type == 'pid_shaped':
@@ -419,6 +434,7 @@ class ThermalEnv(gym.Env):
                 cycling_penalty = 0.0
             
             reward = comfort_penalty + derivative_bonus + integral_penalty + energy_penalty + cycling_penalty
+            return reward, cycling_penalty
             
         elif self.reward_type == 'literature':
             # Literature-based reward: linear temperature deviation
@@ -434,6 +450,7 @@ class ThermalEnv(gym.Env):
                 cycling_penalty = 0.0
             
             reward = comfort_penalty + energy_penalty + cycling_penalty
+            return reward, cycling_penalty
             
         else:  # 'quadratic' (original implementation)
             # Comfort penalty (quadratic outside comfort zone)
@@ -448,8 +465,9 @@ class ThermalEnv(gym.Env):
             energy_cost = -self.energy_weight * (P_electrical / 1000.0) * self.electricity_price
             
             reward = comfort_penalty + energy_cost
+            cycling_penalty = 0.0  # No cycling penalty in quadratic mode
         
-        return reward
+        return reward, cycling_penalty
     
     def _get_info(self) -> Dict[str, Any]:
         """
